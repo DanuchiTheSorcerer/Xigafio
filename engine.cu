@@ -1,5 +1,41 @@
 #include "engine.h"
 
+struct Point {
+    float x;
+    float y;
+    float z;
+};
+
+struct Triangle {
+    Point points[3];
+};
+
+struct Mesh {
+    Triangle* triangles;
+    int triangleCount;
+};
+
+struct Model {
+    Triangle* triangles;
+    int triangleCount;
+};
+
+// __device__ void addModelToMesh(Mesh& mesh, Model& model) {
+//     int newTriangleCount = mesh.triangleCount + model.triangleCount;
+//     Triangle* newTriangles = (Triangle*)malloc(newTriangleCount * sizeof(Triangle));
+
+//     for (int i = 0; i < mesh.triangleCount; ++i) {
+//         newTriangles[i] = mesh.triangles[i];
+//     }
+
+//     for (int i = 0; i < model.triangleCount; ++i) {
+//         newTriangles[mesh.triangleCount + i] = model.triangles[i];
+//     }
+
+//     free(mesh.triangles);
+//     mesh.triangles = newTriangles;
+//     mesh.triangleCount = newTriangleCount;
+// }
 
 interpolator tickLogic(int tickCount) {
     interpolator result;
@@ -37,4 +73,8 @@ __device__ void computeFrame(uint32_t* buffer, int width, int height, const inte
     
     // Wait for the child kernel to finish before completing.
     __threadfence();
+}
+
+__device__ void interpolatorUpdateHandler() {
+    
 }
