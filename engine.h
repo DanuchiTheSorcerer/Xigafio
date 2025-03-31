@@ -8,6 +8,11 @@ extern "C" {
 // A simple structure holding game state for interpolation.
 // Extend this structure with more state as needed.
 
+struct Camera {
+    float cameraPos[3] = {0,0,0};
+    float cameraRot[4] = {0,0,0,0};
+};
+
 struct Point {
     float x;
     float y;
@@ -19,22 +24,27 @@ struct Triangle {
 };
 
 struct Mesh {
+    int modelID;
     Triangle* triangles;
     int triangleCount;
 };
 
 struct Model {
-    Triangle* triangles;
-    int triangleCount;
+    int modelID;
     float scale;
     float rotation[4] = {0,0,0,0};
     float position[3] = {0,0,0};
+    bool dynamic; // set to true only if the model ever moves and/or rotates
 };
 
 struct interpolator  {
     int tickCount;
-    Mesh mesh;
     Model* models;
+    Camera camera;
+    Mesh* newMeshes;
+    int newMeshCount;
+    int* freedMeshIDs;
+    int freedMeshCount;
 };
 
 
@@ -47,7 +57,7 @@ interpolator tickLogic(int tickCount);
 __device__ void computeFrame(uint32_t* buffer, int width, int height, const interpolator* interp,float interpolationFactor);
 
 //put gpu response to new interpolator
-__device__ void interpolatorUpdateHandler();
+__device__ void interpolatorUpdateHandler(interpolator* interp);
 
 #ifdef __cplusplus
 }

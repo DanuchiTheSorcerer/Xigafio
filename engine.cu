@@ -1,16 +1,31 @@
 #include "engine.h"
 
 
-
-struct Camera {
-    float cameraPos[3] = {0,0,0};
-    float cameraRot[3] = {0,0,0};
-};
+// IMPORTANT: Best practice is to assign most used models the lowest IDs possible
+__device__ Mesh* loadedModels = nullptr; // pointer to loaded models in global memory
+__device__ int loadedModelCount = 0; // number of loaded models in global memory
 
 
 
-__device__ void addModelsToMesh(Mesh* mesh, Model* models) {
 
+__device__ void saveMesh(Mesh mesh) {
+    // Save the mesh to global memory
+    loadedModels[loadedModelCount] = mesh;
+    loadedModelCount++;
+}
+
+__device__ void freeMesh(int modelID) {
+    // Find the mesh with the matching ID and remove it
+    for (int i = 0; i < loadedModelCount; i++) {
+        if (loadedModels[i].modelID == modelID) {
+            // Shift remaining meshes down to fill the gap
+            for (int j = i; j < loadedModelCount - 1; j++) {
+                loadedModels[j] = loadedModels[j + 1];
+            }
+            loadedModelCount--;
+            break;
+        }
+    }
 }
 
 interpolator tickLogic(int tickCount) {
@@ -49,6 +64,17 @@ __device__ void computeFrame(uint32_t* buffer, int width, int height, const inte
     __threadfence();
 }
 
-__device__ void interpolatorUpdateHandler() {
-    
+__device__ void interpolatorUpdateHandler(interpolator* interp) {
+    // save needed meshes to global memory
+
+    for (int i = 0; i < interp->newMeshCount; i++) {
+        Mesh mesh = interp->newMeshes[i];
+        saveMesh(mesh);
+    }
+
+    // remove unneeded meshes from global memory 
+    for (int i = 0; i < interp->freedMeshCount; i++) {
+        int modelID = interp->freedMeshIDs[i];
+        freeMesh(modelID);
+    }
 }
