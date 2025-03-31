@@ -1,11 +1,21 @@
 #include "engine.h"
 
 
+interpolator tickLogic(int tickCount) {
+    interpolator result;
+    result.tickCount = tickCount;
+    
+
+    return result;
+}
+
+
+
+
+
 // IMPORTANT: Best practice is to assign most used models the lowest IDs possible
 __device__ Mesh* loadedModels = nullptr; // pointer to loaded models in global memory
 __device__ int loadedModelCount = 0; // number of loaded models in global memory
-
-
 
 
 __device__ void saveMesh(Mesh mesh) {
@@ -14,27 +24,34 @@ __device__ void saveMesh(Mesh mesh) {
     loadedModelCount++;
 }
 
-__device__ void freeMesh(int modelID) {
-    // Find the mesh with the matching ID and remove it
-    for (int i = 0; i < loadedModelCount; i++) {
-        if (loadedModels[i].modelID == modelID) {
-            // Shift remaining meshes down to fill the gap
-            for (int j = i; j < loadedModelCount - 1; j++) {
-                loadedModels[j] = loadedModels[j + 1];
-            }
-            loadedModelCount--;
-            break;
-        }
+__global__ void freeMeshKernel(Mesh* models, int* modelCount, int modelID) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < *modelCount && models[idx].modelID == modelID) {
+        // Mark the mesh for removal by setting its modelID to -1
+        models[idx].modelID = -1;
     }
 }
 
-interpolator tickLogic(int tickCount) {
-    interpolator result;
-    result.tickCount = tickCount;
-    
+__device__ void freeMesh(int modelID) {
+    // Launch a kernel to mark the mesh for removal
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (loadedModelCount + threadsPerBlock - 1) / threadsPerBlock;
+    freeMeshKernel<<<blocksPerGrid, threadsPerBlock>>>(loadedModels, &loadedModelCount, modelID);
+    cudaDeviceSynchronize();
 
-    return result;
+    // Compact the array to remove marked meshes
+    int writeIdx = 0;
+    for (int i = 0; i < loadedModelCount; i++) {
+        if (loadedModels[i].modelID != -1) {
+            loadedModels[writeIdx++] = loadedModels[i];
+        }
+    }
+    loadedModelCount = writeIdx;
 }
+
+
+
+
 
 __global__ void computePixel(uint32_t* buffer, int width, int height, const interpolator* interp,float inpf) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
