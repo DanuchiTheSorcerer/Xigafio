@@ -115,36 +115,77 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, int loadedModel
     scale = mesh->scale;
     modelID = mesh->modelID;
 
-    __syncthreads(); // Ensure shared memory is populated
-
-    // Normalize rotation axis
-    float norm = sqrtf(rotationX * rotationX + rotationY * rotationY + rotationZ * rotationZ);
-    float rX = rotationX / norm;
-    float rY = rotationY / norm;
-    float rZ = rotationZ / norm;
-
-    // Compute sine and cosine terms
-    float cosTheta = cosf(rotationAngle);
-    float sinTheta = sinf(rotationAngle);
-    float oneMinusCos = 1.0f - cosTheta;
-
-    // Compute full transformation matrix: scale * rotation + translation
-    int idx = threadIdx.x + threadIdx.y * 4;  // Flatten thread index for 4x4
-    if (idx < 16) {
-        float values[16] = {
-            scale * (1 + oneMinusCos * (rX * rX - 1)), scale * (-rZ * sinTheta + oneMinusCos * rX * rY), scale * (rY * sinTheta + oneMinusCos * rX * rZ), positionX,
-            scale * (rZ * sinTheta + oneMinusCos * rX * rY), scale * (1 + oneMinusCos * (rY * rY - 1)), scale * (-rX * sinTheta + oneMinusCos * rY * rZ), positionY,
-            scale * (-rY * sinTheta + oneMinusCos * rX * rZ), scale * (rX * sinTheta + oneMinusCos * rY * rZ), scale * (1 + oneMinusCos * (rZ * rZ - 1)), positionZ,
-            0, 0, 0, 1  // Homogeneous row
-        };
-        rodriguesMatrix[idx / 4][idx % 4] = __float2half(values[idx]);  // Store result in shared memory
-    }
-    __syncthreads();
-
     SceneObject output;
     output.triangleCount = loadedModels[modelID].triangleCount;
     output.isStatic = dynamic;
 
+
+
+    __syncthreads(); // Ensure shared memory is populated
+
+
+    __shared__ float norm, rX, rY, rZ, cosTheta, sinTheta, oneMinusCos;
+
+    // Normalize rotation axis
+    if (tid == 0) {
+        float norm = sqrtf(rotationX * rotationX + rotationY * rotationY + rotationZ * rotationZ);
+        if (norm > 0.0f) {
+            rX = rotationX / norm;
+            rY = rotationY / norm;
+            rZ = rotationZ / norm;
+        }
+    }
+    if (tid == 1) {
+        // Compute sine and cosine terms
+        cosTheta = cosf(rotationAngle);
+        oneMinusCos = 1.0f - cosTheta;
+    }
+    if (tid == 2) {
+        sinTheta = sinf(rotationAngle);
+    }
+
+    __syncthreads(); // Ensure shared memory is populated
+
+    // Compute the Rodrigues rotation matrix
+    // Compute shared intermediate values in parallel
+    __shared__ float sx, sy, sz, tXX, tYY, tZZ, tXY, tXZ, tYZ;
+
+    if (tid == 0) sx = sinTheta * rX;
+    if (tid == 1) sy = sinTheta * rY;
+    if (tid == 2) sz = sinTheta * rZ;
+    if (tid == 3) tXX = oneMinusCos * rX * rX;
+    if (tid == 4) tYY = oneMinusCos * rY * rY;
+    if (tid == 5) tZZ = oneMinusCos * rZ * rZ;
+    if (tid == 6) tXY = oneMinusCos * rX * rY;
+    if (tid == 7) tXZ = oneMinusCos * rX * rZ;
+    if (tid == 8) tYZ = oneMinusCos * rY * rZ;
+
+    __syncthreads(); // Ensure precomputed values are available
+
+    // Compute scaled rotation matrix elements in parallel
+    if (tid == 0) rodriguesMatrix[0][0] = __float2half(scale * (tXX + cosTheta));
+    if (tid == 1) rodriguesMatrix[0][1] = __float2half(scale * (tXY - sz));
+    if (tid == 2) rodriguesMatrix[0][2] = __float2half(scale * (tXZ + sy));
+    if (tid == 3) rodriguesMatrix[0][3] = __float2half(positionX);
+
+    if (tid == 4) rodriguesMatrix[1][0] = __float2half(scale * (tXY + sz));
+    if (tid == 5) rodriguesMatrix[1][1] = __float2half(scale * (tYY + cosTheta));
+    if (tid == 6) rodriguesMatrix[1][2] = __float2half(scale * (tYZ - sx));
+    if (tid == 7) rodriguesMatrix[1][3] = __float2half(positionY);
+
+    if (tid == 8) rodriguesMatrix[2][0] = __float2half(scale * (tXZ - sy));
+    if (tid == 9) rodriguesMatrix[2][1] = __float2half(scale * (tYZ + sx));
+    if (tid == 10) rodriguesMatrix[2][2] = __float2half(scale * (tZZ + cosTheta));
+    if (tid == 11) rodriguesMatrix[2][3] = __float2half(positionZ);
+
+    if (tid == 12) {
+        rodriguesMatrix[3][0] = __float2half(0.0f);
+        rodriguesMatrix[3][1] = __float2half(0.0f);
+        rodriguesMatrix[3][2] = __float2half(0.0f);
+        rodriguesMatrix[3][3] = __float2half(1.0f);
+    }
+
+    __syncthreads();
 }
 
 
