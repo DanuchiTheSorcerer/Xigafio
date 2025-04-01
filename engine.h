@@ -23,13 +23,13 @@ struct Triangle {
     Point points[3];
 };
 
-struct Mesh {
+struct Model {
     int modelID;
     Triangle* triangles;
     int triangleCount;
 };
 
-struct Model {
+struct Mesh {
     int modelID;
     float scale;
     float rotation[4] = {0,0,0,0};
@@ -39,12 +39,13 @@ struct Model {
 
 struct interpolator  {
     int tickCount;
-    Model* models;
+    Mesh* meshes;
+    int meshCount;
     Camera camera;
-    Mesh* newMeshes;
-    int newMeshCount;
-    int* freedMeshIDs;
-    int freedMeshCount;
+    Model* newModels;
+    int newModelCount;
+    int* freedModelIDs;
+    int freedModelCount;
 };
 
 
