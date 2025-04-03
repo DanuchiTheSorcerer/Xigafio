@@ -40,7 +40,8 @@ struct Mesh {
 struct interpolator  {
     int tickCount;
     Mesh* meshes;
-    int meshCount;
+    int staticMeshCount;
+    int dynamicMeshCount;
     Camera camera;
     Model* newModels;
     int newModelCount;

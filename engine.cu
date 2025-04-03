@@ -66,10 +66,11 @@ __global__ void computePixel(uint32_t* buffer, int width, int height, const inte
     
     if (x < width && y < height) {
         int idx = y * width + x;
-        int modVal = interp->tickCount;
-        uint32_t red   = 128 + 127*sinf((float)x/128 + ((float)modVal*inpf)/60);
-        uint32_t green = 128 + 127*cosf((float)y/128 + ((float)modVal*inpf)/60);
-        uint32_t blue  = 128 + 12*sinf((float)x/128 + (float)y/128 + ((float)modVal*inpf)/6);
+        int speed = 3;
+        int modVal = interp->tickCount*speed;
+        uint32_t red   = 128 + 127*sinf((float)x/128 + ((float)modVal+inpf*speed)/60);
+        uint32_t green = 128 + 127*cosf((float)y/128 + ((float)modVal+inpf*speed)/60);
+        uint32_t blue  = 128 + 12*sinf((float)x/128 + (float)y/128 + ((float)modVal+inpf*speed)/6);
         buffer[idx] = 0xFF000000 | (red << 16) | (green << 8) | blue;
     }
 }
@@ -89,7 +90,7 @@ __device__ void computeFrame(uint32_t* buffer, int width, int height, const inte
 }
 
 
-__global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, int loadedModelCount, bool dynamic) {
+__global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, SceneObject* output) {
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     if (meshes[bid].dynamic ^ dynamic) {
@@ -99,32 +100,29 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, int loadedModel
     __shared__ float positionX, positionY, positionZ;
     __shared__ float rotationX, rotationY, rotationZ, rotationAngle;
     __shared__ float scale;
-    __shared__ Mesh *mesh = &meshes[bid];
     __shared__ int modelID;
     __shared__ half rodriguesMatrix[4][4];
 
 
 
-    positionX = mesh->position[0];
-    positionY = mesh->position[1];
-    positionZ = mesh->position[2];
-    rotationX = mesh->rotation[0];
-    rotationY = mesh->rotation[1];
-    rotationZ = mesh->rotation[2];
-    rotationAngle = mesh->rotation[3];
-    scale = mesh->scale;
-    modelID = mesh->modelID;
+    positionX = meshes[bid].position[0];
+    positionY = meshes[bid].position[1];
+    positionZ = meshes[bid].position[2];
+    rotationX = meshes[bid].rotation[0];
+    rotationY = meshes[bid].rotation[1];
+    rotationZ = meshes[bid].rotation[2];
+    rotationAngle = meshes[bid].rotation[3];
+    scale = meshes[bid].scale;
+    modelID = meshes[bid].modelID;
 
-    SceneObject output;
-    output.triangleCount = loadedModels[modelID].triangleCount;
-    output.isStatic = dynamic;
+    int triangleCount = loadedModels[modelID].triangleCount;
 
 
 
     __syncthreads(); // Ensure shared memory is populated
 
 
-    __shared__ float norm, rX, rY, rZ, cosTheta, sinTheta, oneMinusCos;
+    __shared__ float rX, rY, rZ, cosTheta, sinTheta, oneMinusCos;
 
     // Normalize rotation axis
     if (tid == 0) {
@@ -186,6 +184,69 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, int loadedModel
     }
 
     __syncthreads();
+
+    __shared__ half chunckedMatrix[16][16];
+    if (tid < 16) {
+        chunckedMatrix[tid / 4][tid % 4] = rodriguesMatrix[tid / 4][tid % 4];
+        chunckedMatrix[4 + tid / 4][4 + tid % 4] = rodriguesMatrix[tid / 4][tid % 4];
+        chunckedMatrix[8 + tid / 4][8 + tid % 4] = rodriguesMatrix[tid / 4][tid % 4];
+        chunckedMatrix[12 + tid / 4][12 + tid % 4] = rodriguesMatrix[tid / 4][tid % 4];
+    }
+
+    __syncthreads();
+
+
+    int batchNumber = (triangleCount + 19) / 20; // round up
+
+    for (int i = 0; i < batchNumber;i++) {
+        //batch points together
+        __shared__ half batch[16][16];
+        int threadSpotRow = tid/5;
+        int threadSpotCol = tid%5;
+
+        if (triangleCount % 20 == 0 || i* 20 + threadSpotRow * 5 + threadSpotCol < triangleCount) { // only let a thread batch if it has a triangle to batch
+            for (int j = 0; j < 3;j++) {
+                batch[threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID].triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].x);
+                batch[1 + threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID].triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].y);
+                batch[2 + threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID].triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].z);
+                batch[3 + threadSpotRow * 4][threadSpotCol * 3 + j] = (half) 1;
+            }
+        }
+
+        if (tid < 16) {
+            batch[tid][15] = __float2half(0.0f); // pad the last column
+        }
+        
+        __syncthreads();
+
+        // wmma operations to multiply the matrices
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> b_frag;
+        wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
+        wmma::fragment<wmma::accumulator, 16, 16, 16, float> d_frag;
+
+        // Load matrix A and B from global memory
+        wmma::load_matrix_sync(a_frag, &chunckedMatrix[0][0], 16);
+        wmma::load_matrix_sync(b_frag, &batch[0][0], 16);
+
+        // Load matrix C (accumulator)
+        wmma::fill_fragment(c_frag, 0.0f);
+
+        // Compute matrix multiply
+        wmma::mma_sync(d_frag, a_frag, b_frag, c_frag);
+
+        Triangle* objTri = output[bid].triangles;
+
+        if (triangleCount % 20 == 0 || i * 20 + threadSpotRow * 5 + threadSpotCol < triangleCount) {
+            for (int j = 0; j < 4; j++) { // x, y, z, w components
+                int triangleIndex = i * 20 + (threadSpotRow * 5 + threadSpotCol);
+                int pointIndex = j; // Each row corresponds to one coordinate
+                objTri[triangleIndex].points[pointIndex].x = __half2float(d_frag.x[(threadSpotRow * 4 + 0) * 16 + (threadSpotCol * 3 + j)]);
+                objTri[triangleIndex].points[pointIndex].y = __half2float(d_frag.x[(threadSpotRow * 4 + 1) * 16 + (threadSpotCol * 3 + j)]);
+                objTri[triangleIndex].points[pointIndex].z = __half2float(d_frag.x[(threadSpotRow * 4 + 2) * 16 + (threadSpotCol * 3 + j)]);
+            }
+        }
+    }
 }
 
 
@@ -204,4 +265,8 @@ __device__ void interpolatorUpdateHandler(interpolator* interp) {
     }
 
     // load static objects into scene
+    for (int i = 0; i < worldSceneCount; i++) {
+        SceneObject* obj = &worldScene[i];
+        meshesToWorld<<<interp->staticMeshCount, 32>>>(interp->meshes, loadedModels, false, worldScene);
+    }
 }

@@ -112,7 +112,7 @@ __global__ void frameComputeLoop(gpuMeta* gpuMetaData, int width, int height,cud
          // Compute the elapsed cycles since the last interpolator swap.
          unsigned long long elapsedCycles = currentCycle - lastSwapCycle;
          // Calculate the interpolation factor as a fraction of the 16.67ms period.
-         float interpolationFactor = ((float)elapsedCycles*(float)gpuMetaData->clockRate*(float)tps)/1000;
+         float interpolationFactor = ((float)elapsedCycles*(float)tps)/(1000*(float)gpuMetaData->clockRate);
          // Clamp the factor to 1.0 to avoid overshooting.
          if (interpolationFactor > 1.0f)
              interpolationFactor = 1.0f;
