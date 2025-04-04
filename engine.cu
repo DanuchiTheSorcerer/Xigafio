@@ -1,17 +1,72 @@
 #include "engine.h"
 #include <mma.h>
 #include <cuda_fp16.h>
+#include <cuda_runtime.h>
+#include <windows.h>
 
 
 using namespace nvcuda;
 
+constexpr float pi = 3.14159265358979323846f; // Define pi as a constant
+
 interpolator tickLogic(int tickCount) {
+    Model model ;
+    model.modelID = 0;
+    model.triangleCount = 1;
+    model.triangles = new Triangle[model.triangleCount];
+    model.triangles[0].points[0].x = 0.0f;
+    model.triangles[0].points[0].y = 0.0f;
+    model.triangles[0].points[0].z = 0.0f;
+    model.triangles[0].points[1].x = 1.0f;
+    model.triangles[0].points[1].y = 0.0f;
+    model.triangles[0].points[1].z = 0.0f;
+    model.triangles[0].points[2].x = 1.0f;
+    model.triangles[0].points[2].y = 1.0f;
+    model.triangles[0].points[2].z = 0.0f;
+
+
+    Mesh testMesh;
+    testMesh.modelID = 0;
+    testMesh.scale = 1.0f;
+    testMesh.position[0] = 0.0f;
+    testMesh.position[1] = 0.0f;
+    testMesh.position[2] = 0.0f;
+    testMesh.rotation[0] = 0.0f;
+    testMesh.rotation[1] = 1.0f;
+    testMesh.rotation[2] = 0.0f;
+    testMesh.rotation[3] = pi/2;
+    testMesh.dynamic = false;
+
+
+
+
+
     interpolator result;
     result.tickCount = tickCount;
     result.freedModelCount = 0;
     result.newModelCount = 0;
+    if (tickCount == 0) {
+        result.newModelCount = 1;
+        result.newModels[0] = model;
+        //result.staticMeshCount = 1;
+        //result.dynamicMeshCount = 0;
+        //result.meshes[0] = testMesh;
+    }
+
 
     return result;
+    // for refrence
+    // struct interpolator  {
+    //     int tickCount;
+    //     Mesh* meshes;
+    //     int staticMeshCount;
+    //     int dynamicMeshCount;
+    //     Camera camera;
+    //     Model* newModels;
+    //     int newModelCount;
+    //     int* freedModelIDs;
+    //     int freedModelCount;
+    // };
 }
 
 
@@ -19,33 +74,7 @@ interpolator tickLogic(int tickCount) {
 
 
 // IMPORTANT: Best practice is to assign most used models the lowest IDs possible
-__device__ Model* loadedModels = nullptr; // pointer to loaded models in global memory
-__device__ int loadedModelCount = 0; // number of loaded models in global memory
-
-
-__device__ void saveModel(Model model) {
-    // Save the mesh to global memory
-    loadedModels[loadedModelCount] = model;
-    loadedModelCount++;
-}
-
-__device__ void freeModel(int modelID) {
-    // Mark the mesh for removal by setting its modelID to -1
-    for (int i = 0; i < loadedModelCount; i++) {
-        if (loadedModels[i].modelID == modelID) {
-            loadedModels[i].modelID = -1;
-        }
-    }
-
-    // Compact the array to remove marked meshes
-    int writeIdx = 0;
-    for (int i = 0; i < loadedModelCount; i++) {
-        if (loadedModels[i].modelID != -1) {
-            loadedModels[writeIdx++] = loadedModels[i];
-        }
-    }
-    loadedModelCount = writeIdx;
-}
+__device__ Model loadedModels[1024]; // pointer to loaded models in global memory
 
 
 struct SceneObject {
@@ -90,7 +119,7 @@ __device__ void computeFrame(uint32_t* buffer, int width, int height, const inte
 }
 
 
-__global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, SceneObject* output) {
+__global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, SceneObject* output) { // takes in meshes and outputs to worldScene
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     if (meshes[bid].dynamic ^ dynamic) {
@@ -254,19 +283,16 @@ __device__ void interpolatorUpdateHandler(interpolator* interp) {
     // save needed models to global memory
 
     for (int i = 0; i < interp->newModelCount; i++) {
-        Model model = interp->newModels[i];
-        saveModel(model);
+        loadedModels[interp->newModels[i].modelID] = interp->newModels[i];
     }
 
     // remove unneeded models from global memory 
     for (int i = 0; i < interp->freedModelCount; i++) {
-        int modelID = interp->freedModelIDs[i];
-        freeModel(modelID);
+        loadedModels[interp->freedModelIDs[i]].modelID = -1; // mark as freed
     }
 
     // load static objects into scene
     for (int i = 0; i < worldSceneCount; i++) {
-        SceneObject* obj = &worldScene[i];
         meshesToWorld<<<interp->staticMeshCount, 32>>>(interp->meshes, loadedModels, false, worldScene);
     }
 }
