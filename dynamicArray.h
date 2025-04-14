@@ -73,7 +73,7 @@ namespace cuda_containers {
         __device__ bool push_back(const T& element) {
             if (size >= capacity) {
                 // Calculate new capacity with growth factor
-                size_t newCapacity = max(1, (size_t)(capacity * growthFactor));
+                size_t newCapacity = max((size_t)1, (size_t)(capacity * growthFactor));
                 if (newCapacity <= capacity) {
                     newCapacity = capacity + 1; // Ensure we always grow
                 }
@@ -143,6 +143,50 @@ namespace cuda_containers {
             // Adjust size if new capacity is smaller
             if (size > capacity) {
                 size = capacity;
+            }
+            
+            return true;
+        }
+
+        /**
+         * @brief Removes an element at the specified index
+         * 
+         * Shifts all elements after the removed element to fill the gap.
+         * Can optionally shrink the array if there's significant unused capacity.
+         * 
+         * @param index Index of element to remove
+         * @param shrinkThreshold Ratio of size/capacity below which array may shrink (0.0-1.0)
+         * @return true if successful, false if index out of bounds
+         */
+        __device__ bool remove(size_t index, float shrinkThreshold = 0.5f) {
+            // Check if index is valid
+            if (index >= size) {
+                return false;
+            }
+            
+            // Shift elements to fill the gap
+            for (size_t i = index; i < size - 1; i++) {
+                data[i] = data[i + 1];
+            }
+            
+            // Decrease size
+            size--;
+            
+            // Potentially shrink the array if there's too much unused capacity
+            if (shrinkThreshold > 0.0f && shrinkThreshold <= 1.0f && 
+                size > 0 && capacity > 0 && 
+                ((float)size / capacity) < shrinkThreshold) {
+                
+                // Calculate new capacity (at least double the current size to avoid frequent resizing)
+                size_t newCapacity = max(
+                    (size_t)(size * 1.5f),  // Provide some room for growth
+                    (size_t)(capacity * shrinkThreshold)  // Don't shrink too aggressively
+                );
+                
+                // Only resize if it will meaningfully reduce capacity
+                if (newCapacity < capacity * 0.75f) {
+                    resize(newCapacity);
+                }
             }
             
             return true;

@@ -3,6 +3,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <windows.h>
+#include "dynamicArray.h"
 
 
 using namespace nvcuda;
@@ -46,8 +47,8 @@ interpolator tickLogic(int tickCount) {
     result.freedModelCount = 0;
     result.newModelCount = 0;
     if (tickCount == 0) {
-        result.newModelCount = 1;
-        result.newModels[0] = model;
+        //result.newModelCount = 1;
+        //result.newModels[0] = model;
         //result.staticMeshCount = 1;
         //result.dynamicMeshCount = 0;
         //result.meshes[0] = testMesh;
@@ -74,7 +75,6 @@ interpolator tickLogic(int tickCount) {
 
 
 // IMPORTANT: Best practice is to assign most used models the lowest IDs possible
-__device__ Model loadedModels[1024]; // pointer to loaded models in global memory
 
 
 struct SceneObject {
@@ -280,19 +280,5 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, S
 
 
 __device__ void interpolatorUpdateHandler(interpolator* interp) {
-    // save needed models to global memory
 
-    for (int i = 0; i < interp->newModelCount; i++) {
-        loadedModels[interp->newModels[i].modelID] = interp->newModels[i];
-    }
-
-    // remove unneeded models from global memory 
-    for (int i = 0; i < interp->freedModelCount; i++) {
-        loadedModels[interp->freedModelIDs[i]].modelID = -1; // mark as freed
-    }
-
-    // load static objects into scene
-    for (int i = 0; i < worldSceneCount; i++) {
-        meshesToWorld<<<interp->staticMeshCount, 32>>>(interp->meshes, loadedModels, false, worldScene);
-    }
 }
