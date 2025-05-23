@@ -3,88 +3,74 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <windows.h>
-#include "dynamicArray.h"
-
+#include <vector>
 
 using namespace nvcuda;
 
 constexpr float pi = 3.14159265358979323846f; // Define pi as a constant
+constexpr int maxAmountOfModels = 262144; // maximum amount of models device will store
+Model* models; // device pointer to array of models
+Triangle** triAllocs; // host pointer to array of dev ptrs to triangle arrays, obtained from allocation, for freeing
+std::vector<int> usedModelIDs;
+bool loadingModels;
 
-interpolator tickLogic(int tickCount) {
-    Model model ;
-    model.modelID = 0;
-    model.triangleCount = 1;
-    model.triangles = new Triangle[model.triangleCount];
-    model.triangles[0].points[0].x = 0.0f;
-    model.triangles[0].points[0].y = 0.0f;
-    model.triangles[0].points[0].z = 0.0f;
-    model.triangles[0].points[1].x = 1.0f;
-    model.triangles[0].points[1].y = 0.0f;
-    model.triangles[0].points[1].z = 0.0f;
-    model.triangles[0].points[2].x = 1.0f;
-    model.triangles[0].points[2].y = 1.0f;
-    model.triangles[0].points[2].z = 0.0f;
-
-
-    Mesh testMesh;
-    testMesh.modelID = 0;
-    testMesh.scale = 1.0f;
-    testMesh.position[0] = 0.0f;
-    testMesh.position[1] = 0.0f;
-    testMesh.position[2] = 0.0f;
-    testMesh.rotation[0] = 0.0f;
-    testMesh.rotation[1] = 1.0f;
-    testMesh.rotation[2] = 0.0f;
-    testMesh.rotation[3] = pi/2;
-    testMesh.dynamic = false;
-
-
-
-
-
-    interpolator result;
-    result.tickCount = tickCount;
-    result.freedModelCount = 0;
-    result.newModelCount = 0;
-    if (tickCount == 0) {
-        //result.newModelCount = 1;
-        //result.newModels[0] = model;
-        //result.staticMeshCount = 1;
-        //result.dynamicMeshCount = 0;
-        //result.meshes[0] = testMesh;
+// Frees all models data and sub allocations, but not models itself
+void clearModels() {
+    for (int i = 0; i < usedModelIDs.size(); i++) {
+        cudaFree(triAllocs[i]);
     }
-
-
-    return result;
-    // for refrence
-    // struct interpolator  {
-    //     int tickCount;
-    //     Mesh* meshes;
-    //     int staticMeshCount;
-    //     int dynamicMeshCount;
-    //     Camera camera;
-    //     Model* newModels;
-    //     int newModelCount;
-    //     int* freedModelIDs;
-    //     int freedModelCount;
-    // };
+    usedModelIDs.clear();
 }
 
-
-
-
-
-// IMPORTANT: Best practice is to assign most used models the lowest IDs possible
-
-
-struct SceneObject {
-    Triangle* triangles;
-    int triangleCount;
-    bool isStatic;
+// Allocates space for triangles on device and copys data over to device
+// @param ID id of the model being loaded
+// @param triangles host pointer to array of triangles
+// @param triangleCount number of triangles in array
+// @note Only works if loadingModels is true to avoid desync
+void loadModel(int ID, Triangle* triangles, int triangleCount) {
+    if (loadingModels) {
+        Model model;
+        model.triangleCount = triangleCount;
+        cudaMalloc(&model.triangles,sizeof(Triangle)*triangleCount);
+        // copy model to device
+        cudaMemcpy(&models[ID],&model,sizeof(Model),cudaMemcpyHostToDevice);
+        // copy triangles to device
+        cudaMemcpy(model.triangles,triangles,sizeof(Triangle)*triangleCount,cudaMemcpyHostToDevice);
+        usedModelIDs.push_back(ID);
+    }
 };
 
-__device__ SceneObject* worldScene = nullptr; // pointer to objects in global memory
-__device__ int worldSceneCount = 0; // number of objects in world space
+interpolator tickLogic(int tickCount) {
+    interpolator result;
+
+    if (tickCount == 0) {
+        cudaMalloc(&models, sizeof(Model) * maxAmountOfModels);
+        triAllocs = (Triangle**) malloc(sizeof(Triangle*) * maxAmountOfModels);
+    }
+
+    // model.triangles[0].points[0].x = 0.0f;
+    // model.triangles[0].points[0].y = 0.0f;
+    // model.triangles[0].points[0].z = 0.0f;
+    // model.triangles[0].points[1].x = 1.0f;
+    // model.triangles[0].points[1].y = 0.0f;
+    // model.triangles[0].points[1].z = 0.0f;
+    // model.triangles[0].points[2].x = 1.0f;
+    // model.triangles[0].points[2].y = 1.0f;
+    // model.triangles[0].points[2].z = 0.0f;
+
+
+    if (tickCount == 0) {
+
+    }
+
+    result.tickCount = tickCount;
+    result.loadingModels = loadingModels;
+    return result;
+};
+
+
+
+
 
 
 
@@ -119,7 +105,8 @@ __device__ void computeFrame(uint32_t* buffer, int width, int height, const inte
 }
 
 
-__global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, SceneObject* output) { // takes in meshes and outputs to worldScene
+
+/*__global__ void meshesToWorld(Mesh* meshes, Model** loadedModels, bool dynamic, SceneObject* output) { // takes in meshes and outputs to worldScene
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     if (meshes[bid].dynamic ^ dynamic) {
@@ -144,7 +131,7 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, S
     scale = meshes[bid].scale;
     modelID = meshes[bid].modelID;
 
-    int triangleCount = loadedModels[modelID].triangleCount;
+    int triangleCount = loadedModels[modelID]->triangleCount;
 
 
 
@@ -235,9 +222,9 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, S
 
         if (triangleCount % 20 == 0 || i* 20 + threadSpotRow * 5 + threadSpotCol < triangleCount) { // only let a thread batch if it has a triangle to batch
             for (int j = 0; j < 3;j++) {
-                batch[threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID].triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].x);
-                batch[1 + threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID].triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].y);
-                batch[2 + threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID].triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].z);
+                batch[threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID]->triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].x);
+                batch[1 + threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID]->triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].y);
+                batch[2 + threadSpotRow * 4][threadSpotCol * 3 + j] = __float2half(loadedModels[modelID]->triangles[i * 20 + (threadSpotRow * 5 + threadSpotCol)].points[j].z);
                 batch[3 + threadSpotRow * 4][threadSpotCol * 3 + j] = (half) 1;
             }
         }
@@ -276,9 +263,18 @@ __global__ void meshesToWorld(Mesh* meshes, Model* loadedModels, bool dynamic, S
             }
         }
     }
-}
+}*/
 
 
 __device__ void interpolatorUpdateHandler(interpolator* interp) {
+    if (interp->tickCount == 0) {
+    }
+}
 
+
+void cleanUpCall() {
+    clearModels();
+    cudaFree(models);
+    free(triAllocs);
+    usedModelIDs.clear();
 }

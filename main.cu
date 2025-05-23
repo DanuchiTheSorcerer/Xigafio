@@ -19,12 +19,13 @@ bool running = true;
 
 
 struct gpuMeta {
-    uint32_t* frame; //array of buffers
+    uint32_t* frame; //buffer is array of pixels
     interpolator interpolators[2]; // array of interpolators
     int activeInterpolator = 0; // index of the current interpolator being used
     uint32_t* pointerToDisplay;
     int framesCalculated;
     int clockRate;
+    Model** loadedModels;
 
     //flags, set only by the CPU and interpreted by GPU when it has the chance
     bool shouldSwitchInterpolator = false;  // for switching interpolator, set after new one has been copied
@@ -158,6 +159,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     while (running) {
         if (WinLib_PollEvents(&msg)) {
             running = false;
+            cleanUpCall();
         }
         if (running) {
             auto now = std::chrono::high_resolution_clock::now();
