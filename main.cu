@@ -159,7 +159,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     while (running) {
         if (WinLib_PollEvents(&msg)) {
             running = false;
-            cleanUpCall();
         }
         if (running) {
             auto now = std::chrono::high_resolution_clock::now();
@@ -240,5 +239,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     cudaEventDestroy(interpolatorCopyEvent);
     cudaEventDestroy(fpsCopyEvent);
     cudaFreeHost(displayFrame);
+    cleanUpCall();
     return 0;
 }

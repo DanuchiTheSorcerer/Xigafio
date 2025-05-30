@@ -11,8 +11,8 @@ constexpr float pi = 3.14159265358979323846f; // Define pi as a constant
 constexpr int maxAmountOfModels = 262144; // maximum amount of models device will store
 Model* models; // device pointer to array of models
 Triangle** triAllocs; // host pointer to array of dev ptrs to triangle arrays, obtained from allocation, for freeing
-std::vector<int> usedModelIDs;
-bool loadingModels;
+std::vector<int> usedModelIDs; // list of model ids allocated to, used for freeing
+bool loadingModels; // meant to keep things synchronized when loading models
 
 // Frees all models data and sub allocations, but not models itself
 void clearModels() {
@@ -26,7 +26,8 @@ void clearModels() {
 // @param ID id of the model being loaded
 // @param triangles host pointer to array of triangles
 // @param triangleCount number of triangles in array
-// @note Only works if loadingModels is true to avoid desync
+// @note Only works if loadingModels is true to avoid desync. \n
+//  It is also highly recommended that the Mesh allocation be made BEFORE loading models to avoid cheese memory
 void loadModel(int ID, Triangle* triangles, int triangleCount) {
     if (loadingModels) {
         Model model;
@@ -48,22 +49,56 @@ interpolator tickLogic(int tickCount) {
         triAllocs = (Triangle**) malloc(sizeof(Triangle*) * maxAmountOfModels);
     }
 
-    // model.triangles[0].points[0].x = 0.0f;
-    // model.triangles[0].points[0].y = 0.0f;
-    // model.triangles[0].points[0].z = 0.0f;
-    // model.triangles[0].points[1].x = 1.0f;
-    // model.triangles[0].points[1].y = 0.0f;
-    // model.triangles[0].points[1].z = 0.0f;
-    // model.triangles[0].points[2].x = 1.0f;
-    // model.triangles[0].points[2].y = 1.0f;
-    // model.triangles[0].points[2].z = 0.0f;
+    Model tm;
+    tm.triangles = new Triangle[1];
+    tm.triangles[0].x1 = 0.0f;
+    tm.triangles[0].y1 = 0.0f;
+    tm.triangles[0].z1 = 0.0f;
+    tm.triangles[0].x2 = 1.0f;
+    tm.triangles[0].y2 = 0.0f;
+    tm.triangles[0].z2 = 0.0f;
+    tm.triangles[0].x3 = 1.0f;
+    tm.triangles[0].y3 = 1.0f;
+    tm.triangles[0].z3 = 0.0f;
 
+    Model tm2;
+    tm2.triangles = new Triangle[2];
+    tm2.triangles[0].x1 = 1.0f;
+    tm2.triangles[0].y1 = 1.0f;
+    tm2.triangles[0].z1 = 1.0f;
+    tm2.triangles[0].x2 = 1.0f;
+    tm2.triangles[0].y2 = 0.0f;
+    tm2.triangles[0].z2 = 1.0f;
+    tm2.triangles[0].x3 = 1.0f;
+    tm2.triangles[0].y3 = 1.0f;
+    tm2.triangles[0].z3 = 1.0f;
+
+    tm2.triangles[1].x1 = 1.0f;
+    tm2.triangles[1].y1 = 1.0f;
+    tm2.triangles[1].z1 = 1.0f;
+    tm2.triangles[1].x2 = 0.0f;
+    tm2.triangles[1].y2 = 0.0f;
+    tm2.triangles[1].z2 = 0.0f;
+    tm2.triangles[1].x3 = 1.0f;
+    tm2.triangles[1].y3 = 1.0f;
+    tm2.triangles[1].z3 = 1.0f;
 
     if (tickCount == 0) {
+        loadingModels = true;
+        loadModel(0,tm.triangles,1);
+        loadModel(2,tm2.triangles,2);
+    }
 
+    if (tickCount == 1) {
+        
+    }
+
+    if (tickCount == 2) {
+        loadingModels = false;
     }
 
     result.tickCount = tickCount;
+    result.models = models;
     result.loadingModels = loadingModels;
     return result;
 };
@@ -78,16 +113,47 @@ interpolator tickLogic(int tickCount) {
 __global__ void computePixel(uint32_t* buffer, int width, int height, const interpolator* interp,float inpf) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    
+
     if (x < width && y < height) {
         int idx = y * width + x;
-        int speed = 3;
-        int modVal = interp->tickCount*speed;
-        uint32_t red   = 128 + 127*sinf((float)x/128 + ((float)modVal+inpf*speed)/60);
-        uint32_t green = 128 + 127*cosf((float)y/128 + ((float)modVal+inpf*speed)/60);
-        uint32_t blue  = 128 + 12*sinf((float)x/128 + (float)y/128 + ((float)modVal+inpf*speed)/6);
-        buffer[idx] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+        uint32_t blah;
+        int modelID = 2;
+        int tn = 1;
+        if (interp->models[modelID].triangleCount != 0 && x == 100) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].x1 != 0 && x == 150) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].y1 != 0 && x == 200) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].z1 != 0 && x == 250) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].x2 != 0 && x == 300) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].y2 != 0 && x == 350) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].z2 != 0 && x == 400) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].x3 != 0 && x == 450) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].y3 != 0 && x == 500) {
+            blah = 0;
+        } else if (interp->models[modelID].triangles[tn].z3 != 0 && x == 550) {
+            blah = 0;
+        } else {
+            blah = 255;
+        }
+        buffer[idx] = 0xFF000000 | (blah << 16) | (blah << 8) | blah;
     }
+    // cool animation
+    // if (x < width && y < height) {
+    //     int idx = y * width + x;
+    //     int speed = 3;
+    //     int modVal = interp->tickCount*speed;
+    //     uint32_t red   = 128 + 127*sinf((float)x/128 + ((float)modVal+inpf*speed)/60);
+    //     uint32_t green = 128 + 127*cosf((float)y/128 + ((float)modVal+inpf*speed)/60);
+    //     uint32_t blue  = 128 + 12*sinf((float)x/128 + (float)y/128 + ((float)modVal+inpf*speed)/6);
+    //     buffer[idx] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+    // }
 }
 
 

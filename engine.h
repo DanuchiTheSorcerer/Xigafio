@@ -50,6 +50,7 @@ struct Model {
 
 struct interpolator  {
     int tickCount;
+    Model* models;
     bool loadingModels;
 };
 
