@@ -104,6 +104,8 @@ __global__ void frameComputeLoop(gpuMeta* gpuMetaData, int width, int height,cud
         if (gpuMetaData->shouldSwitchInterpolator) {
             gpuMetaData->activeInterpolator = 1 - gpuMetaData->activeInterpolator;
             interpolatorUpdateHandler(&gpuMetaData->interpolators[gpuMetaData->activeInterpolator]);
+            // Block until all threads in the block have finished the update
+            __syncthreads();
             gpuMetaData->shouldSwitchInterpolator = false;
             lastSwapCycle = clock64();
         }

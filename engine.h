@@ -8,26 +8,17 @@ extern "C" {
 // A simple structure holding game state for interpolation.
 // Extend this structure with more state as needed.
 
-// struct Camera {
-//     float x;
-//     float y;
-//     float z;
-//     float rotX;
-//     float rotY;
-//     float rotZ;
-//     float theta;
-// };
+struct Camera {
+    float3 pos;
+    float3 rotAxis;
+    float theta;
+    float focalLength;
+};
 
 struct Triangle {
-    float x1;
-    float y1;
-    float z1;
-    float x2;
-    float y2;
-    float z2;
-    float x3;
-    float y3;
-    float z3;
+    float3 p1;
+    float3 p2;
+    float3 p3;
 };
 
 struct Model {
@@ -35,23 +26,27 @@ struct Model {
     int triangleCount;
 };
 
-// struct Mesh {
-//     int modelID;
-//     float scale;
-//     float x;
-//     float y;
-//     float z;
-//     float rotX;
-//     float rotY;
-//     float rotZ;
-//     float theta;
-//     bool dynamic; // set to true only if the mesh ever moves and/or rotates
-// };
+struct Mesh {
+    int modelID;
+    float scale;
+    float3 pos;
+    float3 rotAxis;
+    float theta;
+};
 
 struct interpolator  {
     int tickCount;
     Model* models;
     bool loadingModels;
+    Camera camera;
+    Triangle* scene;
+    int sceneTriangleCount;
+    Mesh* meshBuffer;
+    Mesh* meshes;
+    Mesh* lastTickMeshes;
+    int bufferMeshCount;
+    int meshesCount;
+    int lastTickMeshCount;
 };
 
 
