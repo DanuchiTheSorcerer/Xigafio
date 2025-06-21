@@ -43,10 +43,9 @@ struct interpolator  {
     int sceneTriangleCount;
     Mesh* meshBuffer;
     Mesh* meshes;
-    Mesh* lastTickMeshes;
     int bufferMeshCount;
     int meshesCount;
-    int lastTickMeshCount;
+    int* meshSizes;
 };
 
 

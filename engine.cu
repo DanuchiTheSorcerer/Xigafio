@@ -18,8 +18,8 @@ bool loadingModels; // meant to keep things synchronized when loading models
 Triangle* scene; // array of triangles before rasterization
 Mesh* meshes; // dev pointer to models for the tick
 int meshCountThisTick;
-Mesh* lastTickMeshes; // dev pointer to last tick's models; used for interpolation
 Mesh* meshBuffer; // cpu copys to it (works like extension of interp buffer behavior)
+int* meshSizes; // used for transformation outputs; ith index corresponds to the total number of triangles in the last i-1 meshes
 
 // Frees all models data and sub allocations, but not models itself
 void clearModels() {
@@ -69,8 +69,9 @@ interpolator tickLogic(int tickCount) {
     if (tickCount == 0) {
         cudaMalloc(&scene,sizeof(Triangle) * maxAmountOfTriangles);
         cudaMalloc(&meshes,sizeof(Mesh) * maxAmountOfMeshes);
-        cudaMalloc(&lastTickMeshes,sizeof(Mesh) * maxAmountOfMeshes);
+        cudaMalloc(&meshBuffer,sizeof(Mesh) * maxAmountOfMeshes);
         cudaMalloc(&models, sizeof(Model) * maxAmountOfModels);
+        cudaMalloc(&meshSizes,sizeof(int) * maxAmountOfMeshes);
         triAllocs = (Triangle**) malloc(sizeof(Triangle*) * maxAmountOfModels);
     }
 
@@ -91,7 +92,7 @@ interpolator tickLogic(int tickCount) {
     camera.pos = make_float3(0.0f, 0.0f, 1.0f);
     camera.rotAxis = make_float3(1.0f,0.0f,0.0f);
     camera.theta = pi;
-    camera.focalLength = 1.0f;
+    camera.focalLength = 0.5f;
 
 
     if (tickCount == 0) {
@@ -103,6 +104,9 @@ interpolator tickLogic(int tickCount) {
     if (tickCount == 200) {
         loadingModels = false;
     }
+    if (!loadingModels) {
+        loadMesh(0,make_float3(0.0f,0.0f,0.0f),make_float3(1.0f,0.0f,0.0f),1.0f,0.0f);
+    }
 
     result.tickCount = tickCount;
     result.models = models;
@@ -111,17 +115,10 @@ interpolator tickLogic(int tickCount) {
     result.scene = scene;
     result.meshBuffer = meshBuffer;
     result.meshes = meshes;
-    result.lastTickMeshes = lastTickMeshes;
     result.bufferMeshCount = meshCountThisTick;
+    result.meshSizes = meshSizes;
     return result;
 };
-
-
-
-
-
-
-
 
 __global__ void computePixel(uint32_t* buffer, int width, int height, const interpolator* interp,float inpf) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -139,60 +136,68 @@ __global__ void computePixel(uint32_t* buffer, int width, int height, const inte
         }
     } else {
         if (x < width && y < height) {
+            float3 p1 = interp->scene[0].p1;
+            float3 p2 = interp->scene[0].p2;
+            float3 p3 = interp->scene[0].p3;
             int idx = y * width + x;
             uint32_t blah;
-            int modelID = 0;
-            int tn = 0;
-            if (interp->models[modelID].triangleCount != 0 && x == 100) {
+
+            if (((((p1.x + 1) * (width/2)) - x)*(((p1.x + 1) * (width/2)) - x) 
+               + (((p1.y + 1) * (height/2)) - y)*(((p1.y + 1) * (height/2)) - y)) <=100) {
                 blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p1.x != 0 && x == 150) {
+            } else if (((((p2.x + 1) * (width/2)) - x)*(((p2.x + 1) * (width/2)) - x) 
+                      + (((p2.y + 1) * (height/2)) - y)*(((p2.y + 1) * (height/2)) - y)) <=100) {
                 blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p1.y != 0 && x == 200) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p1.z != 0 && x == 250) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p2.x != 0 && x == 300) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p2.y != 0 && x == 350) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p2.z != 0 && x == 400) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p3.x != 0 && x == 450) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p3.y != 0 && x == 500) {
-                blah = 0;
-            } else if (interp->models[modelID].triangles[tn].p3.z != 0 && x == 550) {
+            } else if (((((p3.x + 1) * (width/2)) - x)*(((p3.x + 1) * (width/2)) - x) 
+                      + (((p3.y + 1) * (height/2)) - y)*(((p3.y + 1) * (height/2)) - y)) <=100) {
                 blah = 0;
             } else {
                 blah = 255;
             }
+            
             buffer[idx] = 0xFF000000 | (blah << 16) | (blah << 8) | blah;
         }
+        
+        // MODEL DEBUG
+        // if (x < width && y < height) {
+        //     int idx = y * width + x;
+        //     uint32_t blah;
+        //     int modelID = 0;
+        //     int tn = 0;
+        //     if (interp->models[modelID].triangleCount != 0 && x == 100) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p1.x != 0 && x == 150) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p1.y != 0 && x == 200) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p1.z != 0 && x == 250) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p2.x != 0 && x == 300) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p2.y != 0 && x == 350) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p2.z != 0 && x == 400) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p3.x != 0 && x == 450) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p3.y != 0 && x == 500) {
+        //         blah = 0;
+        //     } else if (interp->models[modelID].triangles[tn].p3.z != 0 && x == 550) {
+        //         blah = 0;
+        //     } else {
+        //         blah = 255;
+        //     }
+        //     buffer[idx] = 0xFF000000 | (blah << 16) | (blah << 8) | blah;
+        // }
     }
 }
 
-
-__device__ void computeFrame(uint32_t* buffer, int width, int height, const interpolator* interp,float interpolationFactor) {
-    // Define thread block and grid dimensions for the child kernel.
-    dim3 threadsPerBlock(16, 16);
-    dim3 numBlocks((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
-                   (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
-    
-    // Launch the child kernel to compute pixels.
-    computePixel<<<numBlocks, threadsPerBlock>>>(buffer, width, height, interp,interpolationFactor);
-    
-    // Wait for the child kernel to finish before completing.
-    __threadfence();
-}
-
-
-
-__global__ void meshesToWorld(interpolator* interp) {
+__global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-rasterization triangles
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     
 
-    __shared__ half M16[16][16];
+    __shared__ __align__(16) half M16[16][16]; // transforms point of the form (x,y,z,1) from model space to pre rasterize space
 
     // Only one thread per block needs to compute M16
     if (tid == 0) {
@@ -273,10 +278,11 @@ __global__ void meshesToWorld(interpolator* interp) {
         M4[2][2] =            S * R[2][2];
         M4[2][3] =                  t.z;
 
-        // 4th row = all zeros
-        for (int j = 0; j < 4; ++j) {
+        // 4th row = 0 0 0 1
+        for (int j = 0; j < 3; ++j) {
             M4[3][j] = 0.0f;
         }
+        M4[3][3] = 1.0f;
 
         // Fill M16 with 4 M4s on its diagonal, 0s elsewhere
         // M16 is 16x16, M4 is 4x4
@@ -306,13 +312,14 @@ __global__ void meshesToWorld(interpolator* interp) {
     // ... now every thread in the block can use M16 ...
 
     //for all threads to use
-    __shared__ half V16[16][16];
-    __shared__ Model* model;
+    __shared__ __align__(16) half V16[16][16];
+    __shared__ __align__(16) half V16_out[16][16];
+    __shared__ Triangle* modTri;
     __shared__ int totalTriangles;
 
     if (tid == 0) {
-        model = &(interp->models[interp->meshes[bid].modelID]);
-        totalTriangles = model->triangleCount;
+        modTri = interp->models[interp->meshes[bid].modelID].triangles;
+        totalTriangles = interp->models[interp->meshes[bid].modelID].triangleCount;
     }
     __syncthreads();
         
@@ -323,11 +330,89 @@ __global__ void meshesToWorld(interpolator* interp) {
         // syncthreads
         // WMMA MatMul to produce transformed vectors
         // extract vectors 
-        int trianglesThisBatch = min(20, totalTriangles - batch * 20);
 
+        int trianglesThisBatch = min(20, totalTriangles - batch * 20); // 20 usually, less (or equal) on the last batch
+        if (tid < trianglesThisBatch) {
+            int TriIndex = tid + 20*batch; 
+            float3 points[3];
+            points[0] = modTri[TriIndex].p1;
+            points[1] = modTri[TriIndex].p2;
+            points[2] = modTri[TriIndex].p3;
+            int row = tid / 5; 
+            int column = tid %5;
+            
+            for (int i = 0;i < 3;i++) {
+                V16[column*3 + i][row*4] = points[i].x;
+                V16[column*3 + i][row*4 + 1] = points[i].y;
+                V16[column*3 + i][row*4 + 2] = points[i].z;
+                V16[column*3 + i][row*4 + 3] = 1;
+            }
 
+            
+        }
+
+        __syncthreads();
+
+        //WMMA OPERATIONS HERE
+        // multiply M16*V16, output to V16
+        
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
+        wmma::fragment<wmma::accumulator, 16, 16, 16, half> c_frag;
+
+        // Load A and B from shared memory
+        wmma::load_matrix_sync(a_frag, &M16[0][0], 16);
+        wmma::load_matrix_sync(b_frag, &V16[0][0], 16);
+
+        // Initialize accumulator
+        wmma::fill_fragment(c_frag, 0.0f);
+
+        // Matrix Multiply-Accumulate
+        wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+        
+        // Store result back into V16
+        wmma::store_matrix_sync(&V16_out[0][0], c_frag, 16, wmma::mem_row_major);
+        
+        if (tid < trianglesThisBatch) {
+            int TriIndex = tid + 20*batch;
+            
+            int row = tid / 5; 
+            int column = tid %5; 
+            interp->scene[interp->meshSizes[bid] + TriIndex].p1.x = V16_out[column*3 + 0][row*4 + 0];
+            interp->scene[interp->meshSizes[bid] + TriIndex].p1.y = V16_out[column*3 + 0][row*4 + 1];
+            interp->scene[interp->meshSizes[bid] + TriIndex].p1.z = V16_out[column*3 + 0][row*4 + 2];
+
+            interp->scene[interp->meshSizes[bid] + TriIndex].p2.x = V16_out[column*3 + 1][row*4 + 0];
+            interp->scene[interp->meshSizes[bid] + TriIndex].p2.y = V16_out[column*3 + 1][row*4 + 1];
+            interp->scene[interp->meshSizes[bid] + TriIndex].p2.z = V16_out[column*3 + 1][row*4 + 2];
+
+            interp->scene[interp->meshSizes[bid] + TriIndex].p3.x = V16_out[column*3 + 2][row*4 + 0];
+            interp->scene[interp->meshSizes[bid] + TriIndex].p3.y = V16_out[column*3 + 2][row*4 + 1];
+            interp->scene[interp->meshSizes[bid] + TriIndex].p3.z = V16_out[column*3 + 2][row*4 + 2];
+        }
     }
 }
+
+__device__ void computeFrame(uint32_t* buffer, int width, int height, const interpolator* interp,float interpolationFactor) {
+    // Define thread block and grid dimensions for the child kernel.
+    meshesTo2D<<<interp->meshesCount,32>>>(interp);
+
+    // Launch the child kernel to compute pixels.
+
+    __threadfence();
+
+    dim3 threadsPerBlock(16, 16);
+    dim3 numBlocks((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                   (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
+
+    computePixel<<<numBlocks, threadsPerBlock>>>(buffer, width, height, interp,interpolationFactor);
+    
+    // Wait for the child kernel to finish before completing.
+    __threadfence();
+}
+
+
+
 
 
 
@@ -335,17 +420,18 @@ __device__ void interpolatorUpdateHandler(interpolator* interp) {
     if (interp->tickCount == 0) {
     }
 
-    //copy the mesh to last mesh
-    for (int i = 0; i < interp->meshesCount;i++) {
-        *(lastTickMeshes+i) = *(meshes+i);
-    }
-    interp->lastTickMeshCount = interp->meshesCount;
-
     //copy buffer mesh to mesh
     for (int i = 0;i < interp->bufferMeshCount;i++) {
-        *(meshes+i) = *(meshBuffer + i);
+        *(interp->meshes + i) = *(interp->meshBuffer + i);
     }
     interp->meshesCount = interp->bufferMeshCount;
+
+    //count mesh sizes
+    int triTotals = 0;
+    for (int i = 0; i < interp->meshesCount;i++) {
+        interp->meshSizes[i] = triTotals;
+        triTotals = triTotals + interp->models[interp->meshes[i].modelID].triangleCount;
+    }
 }
 
 
@@ -355,7 +441,7 @@ void cleanUpCall() {
     cudaFree(scene);
     cudaFree(meshBuffer);
     cudaFree(meshes);
-    cudaFree(lastTickMeshes);
+    cudaFree(meshSizes);
     free(triAllocs);
     usedModelIDs.clear();
 }
