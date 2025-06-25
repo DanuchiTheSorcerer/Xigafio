@@ -14,6 +14,17 @@ typedef struct WinWindow {
     HWND hwnd;
 } WinWindow;
 
+// 1. Declare the InputData structure.
+typedef struct InputData {
+    int mouseX;           // Current mouse X position.
+    int mouseY;           // Current mouse Y position.
+    BOOL mousePressed;    // Whether the left mouse button is pressed.
+    BOOL keys[256];       // State for each virtual key.
+} InputData;
+
+// 2. Declare the function that returns the current input state.
+InputData WinLib_GetInputs(void);
+
 /**
  * Initializes the window library by registering a window class.
  *

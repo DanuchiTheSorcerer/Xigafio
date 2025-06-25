@@ -1,14 +1,48 @@
 #include "winlib.h"
 #include <stdlib.h>
+#include <tchar.h>
+
+// Ensure InputData is defined if not already included by winlib.h
 
 static const char* WINLIB_CLASS_NAME = "WinLibWindowClass";
 
+// 2. Global variable to keep track of the most up-to-date InputData.
+static InputData g_inputData = {0};
 
+// 3. Function to return the current input data.
+InputData WinLib_GetInputs(void) {
+    return g_inputData;
+}
 /**
  * The window procedure for handling messages sent to windows created by this library.
  */
 static LRESULT CALLBACK WinLib_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        // Update mouse position on movement.
+        case WM_MOUSEMOVE:
+            g_inputData.mouseX = LOWORD(lParam);
+            g_inputData.mouseY = HIWORD(lParam);
+            break;
+        // Update mouse pressed flag and position on left button press.
+        case WM_LBUTTONDOWN:
+            g_inputData.mousePressed = TRUE;
+            g_inputData.mouseX = LOWORD(lParam);
+            g_inputData.mouseY = HIWORD(lParam);
+            break;
+        // Reset mouse pressed flag on left button release.
+        case WM_LBUTTONUP:
+            g_inputData.mousePressed = FALSE;
+            break;
+        // Mark key as pressed when a key is pressed.
+        case WM_KEYDOWN:
+            if (wParam < 256)
+                g_inputData.keys[wParam] = TRUE;
+            break;
+        // Mark key as released when a key is released.
+        case WM_KEYUP:
+            if (wParam < 256)
+                g_inputData.keys[wParam] = FALSE;
+            break;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -18,6 +52,8 @@ static LRESULT CALLBACK WinLib_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LP
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
+        case WM_ERASEBKGND:
+            return 1; // Prevents background erasure to reduce flicker.
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }

@@ -20,6 +20,7 @@ Mesh* meshes; // dev pointer to models for the tick
 int meshCountThisTick;
 Mesh* meshBuffer; // cpu copys to it (works like extension of interp buffer behavior)
 int* meshSizes; // used for transformation outputs; ith index corresponds to the total number of triangles in the last i-1 meshes
+float* triBright; //keep track of if a tri is culled (69420) and if not dot product of normal with camera (-1 to 1, brightness value) 
 
 // Frees all models data and sub allocations, but not models itself
 void clearModels() {
@@ -62,12 +63,15 @@ void loadMesh(int modelID,float3 pos,float3 rotAxis, float scale, float theta) {
     meshCountThisTick++;
 }
 
-interpolator tickLogic(int tickCount) {
+float playerZ = 0.0f;
+
+interpolator tickLogic(int tickCount,int2 mouse,bool mousePressed,bool* keys) {
     interpolator result;
     meshCountThisTick = 0;
 
     if (tickCount == 0) {
         cudaMalloc(&scene,sizeof(Triangle) * maxAmountOfTriangles);
+        cudaMalloc(&triBright,sizeof(float) * maxAmountOfTriangles);
         cudaMalloc(&meshes,sizeof(Mesh) * maxAmountOfMeshes);
         cudaMalloc(&meshBuffer,sizeof(Mesh) * maxAmountOfMeshes);
         cudaMalloc(&models, sizeof(Model) * maxAmountOfModels);
@@ -88,11 +92,15 @@ interpolator tickLogic(int tickCount) {
     tm.triangles[0].p3.z = 0.0f;
 
 
+    if (mousePressed) {
+        playerZ = playerZ + 0.01f;
+    }
+
     Camera camera;
-    camera.pos = make_float3(0.0f, 0.0f, 1.0f);
+    camera.pos = make_float3(0.0f,playerZ , 1.0f);
     camera.rotAxis = make_float3(1.0f,0.0f,0.0f);
     camera.theta = pi;
-    camera.focalLength = 0.5f;
+    camera.focalLength = 0.25f;
 
 
     if (tickCount == 0) {
@@ -117,6 +125,7 @@ interpolator tickLogic(int tickCount) {
     result.meshes = meshes;
     result.bufferMeshCount = meshCountThisTick;
     result.meshSizes = meshSizes;
+    result.triBright = triBright;
     return result;
 };
 
@@ -124,71 +133,14 @@ __global__ void computePixel(uint32_t* buffer, int width, int height, const inte
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (interp->loadingModels) {
-        if (x < width && y < height) {
-            int idx = y * width + x;
-            int speed = 3;
-            int modVal = interp->tickCount*speed;
-            uint32_t red   = 128 + 127*sinf((float)x/128 + ((float)modVal+inpf*speed)/60);
-            uint32_t green = 128 + 127*cosf((float)y/128 + ((float)modVal+inpf*speed)/60);
-            uint32_t blue  = 128 + 12*sinf((float)x/128 + (float)y/128 + ((float)modVal+inpf*speed)/6);
-            buffer[idx] = 0xFF000000 | (red << 16) | (green << 8) | blue;
-        }
-    } else {
-        if (x < width && y < height) {
-            float3 p1 = interp->scene[0].p1;
-            float3 p2 = interp->scene[0].p2;
-            float3 p3 = interp->scene[0].p3;
-            int idx = y * width + x;
-            uint32_t blah;
-
-            if (((((p1.x + 1) * (width/2)) - x)*(((p1.x + 1) * (width/2)) - x) 
-               + (((p1.y + 1) * (height/2)) - y)*(((p1.y + 1) * (height/2)) - y)) <=100) {
-                blah = 0;
-            } else if (((((p2.x + 1) * (width/2)) - x)*(((p2.x + 1) * (width/2)) - x) 
-                      + (((p2.y + 1) * (height/2)) - y)*(((p2.y + 1) * (height/2)) - y)) <=100) {
-                blah = 0;
-            } else if (((((p3.x + 1) * (width/2)) - x)*(((p3.x + 1) * (width/2)) - x) 
-                      + (((p3.y + 1) * (height/2)) - y)*(((p3.y + 1) * (height/2)) - y)) <=100) {
-                blah = 0;
-            } else {
-                blah = 255;
-            }
-            
-            buffer[idx] = 0xFF000000 | (blah << 16) | (blah << 8) | blah;
-        }
-        
-        // MODEL DEBUG
-        // if (x < width && y < height) {
-        //     int idx = y * width + x;
-        //     uint32_t blah;
-        //     int modelID = 0;
-        //     int tn = 0;
-        //     if (interp->models[modelID].triangleCount != 0 && x == 100) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p1.x != 0 && x == 150) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p1.y != 0 && x == 200) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p1.z != 0 && x == 250) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p2.x != 0 && x == 300) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p2.y != 0 && x == 350) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p2.z != 0 && x == 400) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p3.x != 0 && x == 450) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p3.y != 0 && x == 500) {
-        //         blah = 0;
-        //     } else if (interp->models[modelID].triangles[tn].p3.z != 0 && x == 550) {
-        //         blah = 0;
-        //     } else {
-        //         blah = 255;
-        //     }
-        //     buffer[idx] = 0xFF000000 | (blah << 16) | (blah << 8) | blah;
-        // }
+    if (x < width && y < height) {
+        int idx = y * width + x;
+        int speed = 3;
+        int modVal = interp->tickCount*speed;
+        uint32_t red   = 128 + 127*sinf((float)x/128 + ((float)modVal+inpf*speed)/60);
+        uint32_t green = 128 + 127*cosf((float)y/128 + ((float)modVal+inpf*speed)/60);
+        uint32_t blue  = 128 + 12*sinf((float)x/128 + (float)y/128 + ((float)modVal+inpf*speed)/6);
+        buffer[idx] = 0xFF000000 | (red << 16) | (green << 8) | blue;
     }
 }
 
@@ -213,13 +165,11 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
 
         float M4[4][4];
 
-        // 1) Normalize the rotation axes
         float invLen1 = rsqrtf(U1.x*U1.x + U1.y*U1.y + U1.z*U1.z);
         U1.x *= invLen1;  U1.y *= invLen1;  U1.z *= invLen1;
         float invLen2 = rsqrtf(U2.x*U2.x + U2.y*U2.y + U2.z*U2.z);
         U2.x *= invLen2;  U2.y *= invLen2;  U2.z *= invLen2;
 
-        // 2) Build R1 = R(U1, +THETA1)
         float c1 = cosf(THETA1), s1 = sinf(THETA1), C1 = 1.0f - c1;
         float R1[3][3] = {
             { c1 + U1.x*U1.x*C1,    U1.x*U1.y*C1 - U1.z*s1,  U1.x*U1.z*C1 + U1.y*s1 },
@@ -227,7 +177,6 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
             { U1.z*U1.x*C1 - U1.y*s1, U1.z*U1.y*C1 + U1.x*s1, c1 + U1.z*U1.z*C1     }
         };
 
-        // 3) Build R2 = R(U2, -THETA2) for left‑handed rotation
         float c2 = cosf(THETA2), s2 = -sinf(THETA2), C2 = 1.0f - c2;
         float R2[3][3] = {
             { c2 + U2.x*U2.x*C2,    U2.x*U2.y*C2 - U2.z*s2,  U2.x*U2.z*C2 + U2.y*s2 },
@@ -235,7 +184,6 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
             { U2.z*U2.x*C2 - U2.y*s2, U2.z*U2.y*C2 + U2.x*s2, c2 + U2.z*U2.z*C2     }
         };
 
-        // 4) Combine R = R2 * R1
         float R[3][3];
         #pragma unroll
         for (int i = 0; i < 3; ++i) {
@@ -246,7 +194,6 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
             }
         }
 
-        // 5) Compute the net translation t = R2*T1 - R2*T2
         float3 RT1 = make_float3(
             R2[0][0]*T1.x + R2[0][1]*T1.y + R2[0][2]*T1.z,
             R2[1][0]*T1.x + R2[1][1]*T1.y + R2[1][2]*T1.z,
@@ -261,8 +208,6 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
                                RT1.y - RT2.y,
                                RT1.z - RT2.z);
 
-        // 6) Fill M4 = M3 * (M2*M1) with a 4th zero‐row
-        //    M4 is 4×4; row 0..2 come from the 3×4 M3*(M2*M1), row 3 is all zeros
         M4[0][0] = focalLength * S * R[0][0];
         M4[0][1] = focalLength * S * R[0][1];
         M4[0][2] = focalLength * S * R[0][2];
@@ -278,7 +223,6 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
         M4[2][2] =            S * R[2][2];
         M4[2][3] =                  t.z;
 
-        // 4th row = 0 0 0 1
         for (int j = 0; j < 3; ++j) {
             M4[3][j] = 0.0f;
         }
@@ -357,7 +301,7 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
         // multiply M16*V16, output to V16
         
         wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
-        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> b_frag;
         wmma::fragment<wmma::accumulator, 16, 16, 16, half> c_frag;
 
         // Load A and B from shared memory
@@ -371,7 +315,7 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
         wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
         
         // Store result back into V16
-        wmma::store_matrix_sync(&V16_out[0][0], c_frag, 16, wmma::mem_row_major);
+        wmma::store_matrix_sync(&V16_out[0][0], c_frag, 16, wmma::mem_col_major);
         
         if (tid < trianglesThisBatch) {
             int TriIndex = tid + 20*batch;
@@ -393,21 +337,100 @@ __global__ void meshesTo2D(const interpolator* interp) { //fills scene with pre-
     }
 }
 
+__global__ void rasterizer(uint32_t* buffer, int width, int height, const interpolator* interp,float inpf) { // runs for each pixel, fills buffer 
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int idx = y * width + x;
+
+
+}
+
+__global__ void culler(const interpolator* interp, int width, int height) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    Triangle* threadTri = &(interp->scene[idx]);
+
+    // add in perspective
+    threadTri->p1.x = threadTri->p1.x / threadTri->p1.z;
+    threadTri->p1.y = threadTri->p1.y / threadTri->p1.z;
+    threadTri->p2.x = threadTri->p2.x / threadTri->p2.z;
+    threadTri->p2.y = threadTri->p2.y / threadTri->p2.z;
+    threadTri->p3.x = threadTri->p3.x / threadTri->p3.z;
+    threadTri->p3.y = threadTri->p3.y / threadTri->p3.z;
+
+    //frustrum cull
+    float xLength;
+    float yLength;
+    if (width > height) {
+        xLength = 1.0f;
+        yLength = (float) (height/width);
+    } else {
+        xLength = (float) (width/height);
+        yLength = 1.0f;
+    }
+
+    if (fabsf(threadTri->p1.x) > xLength && fabsf(threadTri->p1.y) > yLength &&
+        fabsf(threadTri->p2.x) > xLength && fabsf(threadTri->p2.y) > yLength &&
+        fabsf(threadTri->p3.x) > xLength && fabsf(threadTri->p3.y) > yLength) {
+        interp->triBright[idx] = 69420.0f;
+    } else {
+        //backface cull
+        // Compute normal
+        float3 v1 = make_float3(threadTri->p2.x - threadTri->p1.x,
+                    threadTri->p2.y - threadTri->p1.y,
+                    threadTri->p2.z - threadTri->p1.z);
+        float3 v2 = make_float3(threadTri->p3.x - threadTri->p1.x,
+                    threadTri->p3.y - threadTri->p1.y,
+                    threadTri->p3.z - threadTri->p1.z);
+        float3 normal = make_float3(
+            v1.y * v2.z - v1.z * v2.y,
+            v1.z * v2.x - v1.x * v2.z,
+            v1.x * v2.y - v1.y * v2.x
+        );
+        // Normalize normal
+        float normLen = sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+        if (normLen > 1e-6f) {
+            normal.z /= normLen;
+        }
+
+        //camera facing 0,0,1
+
+
+        if (normal.z > 0) {
+            interp->triBright[idx] = 69420.0f;
+        } else {
+            interp->triBright[idx] =  -normal.z;
+        }
+
+
+    }
+}
+
 __device__ void computeFrame(uint32_t* buffer, int width, int height, const interpolator* interp,float interpolationFactor) {
-    // Define thread block and grid dimensions for the child kernel.
-    meshesTo2D<<<interp->meshesCount,32>>>(interp);
+    if (interp->loadingModels) {
+        dim3 threadsPerBlock(16, 16);
+        dim3 numBlocks((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                       (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    // Launch the child kernel to compute pixels.
+        computePixel<<<numBlocks, threadsPerBlock>>>(buffer, width, height, interp,interpolationFactor);
+    } else {
+        meshesTo2D<<<interp->meshesCount,32>>>(interp);
 
-    __threadfence();
+        __threadfence();
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 numBlocks((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
-                   (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
+        int blocks = (interp->meshSizes[interp->meshesCount]+255)/256;
 
-    computePixel<<<numBlocks, threadsPerBlock>>>(buffer, width, height, interp,interpolationFactor);
+        culler<<<blocks,256>>>(interp, width, height);
+
+        __threadfence();
+
+        dim3 threadsPerBlock(16, 16);
+        dim3 numBlocks((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                       (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
+
+        rasterizer<<<numBlocks, threadsPerBlock>>>(buffer, width, height, interp,interpolationFactor);
+    }
     
-    // Wait for the child kernel to finish before completing.
     __threadfence();
 }
 
@@ -428,9 +451,9 @@ __device__ void interpolatorUpdateHandler(interpolator* interp) {
 
     //count mesh sizes
     int triTotals = 0;
-    for (int i = 0; i < interp->meshesCount;i++) {
+    for (int i = 1; i < (interp->meshesCount + 1);i++) {
+        triTotals = triTotals + interp->models[interp->meshes[i-1].modelID].triangleCount;
         interp->meshSizes[i] = triTotals;
-        triTotals = triTotals + interp->models[interp->meshes[i].modelID].triangleCount;
     }
 }
 
@@ -442,6 +465,7 @@ void cleanUpCall() {
     cudaFree(meshBuffer);
     cudaFree(meshes);
     cudaFree(meshSizes);
+    cudaFree(triBright);
     free(triAllocs);
     usedModelIDs.clear();
 }

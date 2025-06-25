@@ -40,19 +40,19 @@ struct interpolator  {
     bool loadingModels;
     Camera camera;
     Triangle* scene;
-    int sceneTriangleCount;
     Mesh* meshBuffer;
     Mesh* meshes;
     int bufferMeshCount;
     int meshesCount;
     int* meshSizes;
+    float* triBright;
 };
 
 
 // tickLogic
 // Processes game logic for the given tick count and returns an interpolator 
 // containing the updated game state.
-interpolator tickLogic(int tickCount);
+interpolator tickLogic(int tickCount,int2 mouse,bool mousePressed,bool* keys);
 
 //compute a frame
 __device__ void computeFrame(uint32_t* buffer, int width, int height, const interpolator* interp,float interpolationFactor);

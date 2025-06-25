@@ -167,6 +167,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             std::chrono::duration<float> timeSinceTick = now-lastTickTime;
             std::chrono::duration<float> timeSinceDisplay = now-lastDisplayTime;
             std::chrono::duration<float> timeSinceFpsLog = now - lastFpsLogTime;
+            InputData inputs = WinLib_GetInputs();
 
             //log fps
             if (timeSinceFpsLog.count() >= 1.0f) {
@@ -185,7 +186,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             
             //ticks
             if (timeSinceTick.count() > 1.0f/targetTPS) {
-                interpolator newInterpolator = tickLogic(tickCount++);
+                // Cast inputs.keys (BOOL*) to bool* for compatibility with tickLogic
+                interpolator newInterpolator = tickLogic(tickCount++, make_int2(inputs.mouseX, inputs.mouseY), inputs.mousePressed, reinterpret_cast<bool*>(inputs.keys));
 
                 // Determine the inactive interpolator slot.
                 int inactiveIndex = 1 - currentActiveInterpolator;
