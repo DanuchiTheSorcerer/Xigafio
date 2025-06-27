@@ -63,7 +63,7 @@ void loadMesh(int modelID,float3 pos,float3 rotAxis, float scale, float theta) {
     meshCountThisTick++;
 }
 
-float playerZ = 0.0f;
+
 
 interpolator tickLogic(int tickCount,int2 mouse,bool mousePressed,bool* keys) {
     interpolator result;
@@ -79,33 +79,42 @@ interpolator tickLogic(int tickCount,int2 mouse,bool mousePressed,bool* keys) {
         triAllocs = (Triangle**) malloc(sizeof(Triangle*) * maxAmountOfModels);
     }
 
-    Model tm;
-    tm.triangles = new Triangle[1];
-    tm.triangles[0].p1.x = 0.0f;
-    tm.triangles[0].p1.y = 0.0f;
-    tm.triangles[0].p1.z = 0.0f;
-    tm.triangles[0].p2.x = 1.0f;
-    tm.triangles[0].p2.y = 0.0f;
-    tm.triangles[0].p2.z = 0.0f;
-    tm.triangles[0].p3.x = 0.0f;
-    tm.triangles[0].p3.y = 1.0f;
-    tm.triangles[0].p3.z = 0.0f;
 
-
-    if (mousePressed) {
-        playerZ = playerZ + 0.01f;
-    }
+    
 
     Camera camera;
-    camera.pos = make_float3(0.0f,playerZ , 1.0f);
+    camera.pos = make_float3(0.0f,0.0f , -5.0f);
     camera.rotAxis = make_float3(1.0f,0.0f,0.0f);
-    camera.theta = pi;
-    camera.focalLength = 0.25f;
+    camera.theta = 0.0f;
+    camera.focalLength = 1.0f;
 
 
     if (tickCount == 0) {
         loadingModels = true;
-        loadModel(0,tm.triangles,1);
+        Model cube;
+        cube.triangles = new Triangle[12];
+
+        float3 verts[8] = {
+            {-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
+            {-1, -1,  1}, {1, -1,  1}, {1, 1,  1}, {-1, 1,  1}
+        };
+
+        // Define triangles (two per face)
+        int faces[12][3] = {
+            {2, 1, 0}, {3, 2, 0},  // Back face
+            {6, 5, 1}, {2, 6, 1},  // Right face
+            {7, 4, 5}, {6, 7, 5},  // Front face
+            {3, 0, 4}, {7, 3, 4},  // Left face
+            {6, 2, 3}, {7, 6, 3},  // Top face
+            {1, 5, 4}, {0, 1, 4}   // Bottom face
+        };
+
+        for (int i = 0; i < 12; ++i) {
+            cube.triangles[i].p1 = verts[faces[i][0]];
+            cube.triangles[i].p2 = verts[faces[i][1]];
+            cube.triangles[i].p3 = verts[faces[i][2]];
+        }
+        loadModel(0,cube.triangles,12);
     }
 
 
@@ -113,7 +122,7 @@ interpolator tickLogic(int tickCount,int2 mouse,bool mousePressed,bool* keys) {
         loadingModels = false;
     }
     if (!loadingModels) {
-        loadMesh(0,make_float3(0.0f,0.0f,0.0f),make_float3(1.0f,0.0f,0.0f),1.0f,0.0f);
+        loadMesh(0, make_float3(0.0f, 0.0f, 0.0f), make_float3(0.0f, 1.0f, 0.0f), 1.0f, tickCount * 0.01f);
     }
 
     result.tickCount = tickCount;
@@ -342,7 +351,39 @@ __global__ void rasterizer(uint32_t* buffer, int width, int height, const interp
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = y * width + x;
 
+    float wz = FLT_MAX;
+    int color = 0;
+    for (int i = 0; i < interp->meshSizes[interp->meshesCount]; i++) {
+        float brightness = interp->triBright[i];
+        if (interp->triBright[i] != 69420.0f) {
+            Triangle* tri = &(interp->scene[i]);
+            float3 p1 = tri->p1;
+            float3 p2 = tri->p2;
+            float3 p3 = tri->p3;
+            float3 w = make_float3(((float) (2*x))/((float) width) - 1.0f,((float) (2*y))/((float) height) - 1.0f,0.0f);
+            float3 u = make_float3(p2.x-p1.x,p2.y-p1.y,p2.z-p1.z);
+            float3 v = make_float3(p3.x-p1.x,p3.y-p1.y,p3.z-p1.z);
+            float3 q = make_float3(p3.x-p2.x,p3.y-p2.y,p3.z-p2.z);
+            
 
+            if (
+                (((q.x*(w.y-p2.y) - q.y*(w.x-p2.x)) * (q.x*(p1.y-p2.y) - q.y*(p1.x-p2.x))) >= 0) && 
+                (((v.x*(w.y-p1.y) - v.y*(w.x-p1.x)) * (v.x*u.y - v.y*u.x)) >= 0) && 
+                (((u.x*(w.y-p1.y) - u.y*(w.x-p1.x)) * (u.x*v.y - u.y*v.x)) >= 0)
+                ) {
+                
+                
+
+                float denom = u.x*v.y - u.y*v.x;
+                w.z = u.z * (v.y*w.x - v.x*w.y) / denom + v.z * (u.x*w.y - u.y*w.x) / denom;
+                if (w.z < wz) {
+                    wz = w.z;
+                    color = (int) (brightness * 255);
+                }
+            }
+        }
+    }
+    buffer[idx] = 0xFF000000 | (color << 16) | (color << 8) | color;
 }
 
 __global__ void culler(const interpolator* interp, int width, int height) {
@@ -351,6 +392,10 @@ __global__ void culler(const interpolator* interp, int width, int height) {
     Triangle* threadTri = &(interp->scene[idx]);
 
     // add in perspective
+    if (threadTri->p1.z <= 1e-6f && threadTri->p2.z <= 1e-6f && threadTri->p3.z <= 1e-6f) {
+        interp->triBright[idx] = 69420.0f;
+        return;
+    }
     threadTri->p1.x = threadTri->p1.x / threadTri->p1.z;
     threadTri->p1.y = threadTri->p1.y / threadTri->p1.z;
     threadTri->p2.x = threadTri->p2.x / threadTri->p2.z;
@@ -363,9 +408,9 @@ __global__ void culler(const interpolator* interp, int width, int height) {
     float yLength;
     if (width > height) {
         xLength = 1.0f;
-        yLength = (float) (height/width);
+        yLength =  ((float)height/(float)width);
     } else {
-        xLength = (float) (width/height);
+        xLength = ((float)width/(float)height);
         yLength = 1.0f;
     }
 
@@ -396,7 +441,7 @@ __global__ void culler(const interpolator* interp, int width, int height) {
         //camera facing 0,0,1
 
 
-        if (normal.z > 0) {
+        if (normal.z > -1e-6f) {
             interp->triBright[idx] = 69420.0f;
         } else {
             interp->triBright[idx] =  -normal.z;
